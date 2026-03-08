@@ -1,3 +1,4 @@
+// DAV - I2C Master Controller for MPU6050
 module i2c_master (
     input clk_sys,
     input rst,

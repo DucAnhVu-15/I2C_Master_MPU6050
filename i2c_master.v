@@ -1,5 +1,9 @@
 // DAV - I2C Master Controller for MPU6050
-module i2c_master (
+module i2c_master #(
+    parameter divider = 256,
+    parameter MPU6050_ADDR = 7'h68,
+    parameter READ_BYTES = 6
+) (
     input clk_sys,
     input rst,
     input [7:0] reg_addr,
@@ -9,15 +13,12 @@ module i2c_master (
     input stopfr,
     inout sda,
     inout scl,
-    output [47:0] data_rd,
+    output [(READ_BYTES*8)-1:0] data_rd,
     output reg writebytedone,
     output reg readbytedone,
+    output reg ack_error,
     output reg done
 );
-
-    parameter divider = 256;
-    parameter MPU6050_ADDR = 7'h68;
-    parameter READ_BYTES = 6;
 
     parameter IDLE             = 4'd0;
     parameter START            = 4'd1;
@@ -28,6 +29,7 @@ module i2c_master (
     parameter SEND_MASTER_ACK  = 4'd6;
     parameter SEND_MASTER_NACK = 4'd7;
     parameter STOP             = 4'd8;
+    parameter COMPLETE         = 4'd9;
 
     parameter PHASE_DEV_ADDR_W = 2'd0;
     parameter PHASE_REG_ADDR   = 2'd1;
@@ -36,13 +38,14 @@ module i2c_master (
 
     reg [3:0] state = IDLE;
     reg [2:0] bit_cnt = 3'd7;
-    reg [2:0] read_byte_cnt = 3'd0;
+    reg [4:0] read_byte_cnt = 5'd0;
     reg [1:0] phase = PHASE_DEV_ADDR_W;
     reg [7:0] tx_byte = 8'h00;
     reg [7:0] reg_addr_latched = 8'h00;
     reg [7:0] data_wr_latched = 8'h00;
     reg op_read = 1'b0;
-    reg [47:0] data_rd_reg = 48'd0;
+    reg stop_latched = 1'b0;
+    reg [(READ_BYTES*8)-1:0] data_rd_reg = {(READ_BYTES*8){1'b0}};
     reg [15:0] clock_divider = 16'd0;
     reg sda_out = 1'b1;
     reg sda_en = 1'b1;
@@ -50,21 +53,22 @@ module i2c_master (
     reg scl_en = 1'b1;
     reg ack_flag = 1'b0;
 
-    assign sda = sda_en ? sda_out : 1'bz;
-    assign scl = scl_en ? scl_out : 1'bz;
+    assign sda = (sda_en && !sda_out) ? 1'b0 : 1'bz;
+    assign scl = (scl_en && !scl_out) ? 1'b0 : 1'bz;
     assign data_rd = data_rd_reg;
 
     always @(posedge clk_sys or negedge rst) begin
         if (!rst) begin
             state <= IDLE;
             bit_cnt <= 3'd7;
-            read_byte_cnt <= 3'd0;
+            read_byte_cnt <= 5'd0;
             phase <= PHASE_DEV_ADDR_W;
             tx_byte <= 8'h00;
             reg_addr_latched <= 8'h00;
             data_wr_latched <= 8'h00;
             op_read <= 1'b0;
-            data_rd_reg <= 48'd0;
+            stop_latched <= 1'b0;
+            data_rd_reg <= {(READ_BYTES*8){1'b0}};
             clock_divider <= 16'd0;
             sda_out <= 1'b1;
             sda_en <= 1'b1;
@@ -73,6 +77,7 @@ module i2c_master (
             ack_flag <= 1'b0;
             writebytedone <= 1'b0;
             readbytedone <= 1'b0;
+            ack_error <= 1'b0;
             done <= 1'b0;
         end else begin
             case (state)
@@ -80,10 +85,11 @@ module i2c_master (
                     done <= 1'b0;
                     writebytedone <= 1'b0;
                     readbytedone <= 1'b0;
+                    ack_error <= 1'b0;
                     ack_flag <= 1'b0;
                     clock_divider <= 16'd0;
                     bit_cnt <= 3'd7;
-                    read_byte_cnt <= 3'd0;
+                    read_byte_cnt <= 5'd0;
                     sda_en <= 1'b1;
                     sda_out <= 1'b1;
                     scl_en <= 1'b1;
@@ -93,9 +99,10 @@ module i2c_master (
                         reg_addr_latched <= reg_addr;
                         data_wr_latched <= data_wr;
                         op_read <= r_w;
+                        stop_latched <= stopfr;
                         tx_byte <= {MPU6050_ADDR, 1'b0};
                         phase <= PHASE_DEV_ADDR_W;
-                        data_rd_reg <= 48'd0;
+                        data_rd_reg <= {(READ_BYTES*8){1'b0}};
                         state <= START;
                     end
                 end
@@ -197,7 +204,11 @@ module i2c_master (
                                 PHASE_WRITE_DATA: begin
                                     writebytedone <= 1'b1;
                                     sda_en <= 1'b1;
-                                    state <= STOP;
+                                    sda_out <= 1'b1;
+                                    if (stop_latched)
+                                        state <= STOP;
+                                    else
+                                        state <= COMPLETE;
                                 end
 
                                 default: begin
@@ -205,7 +216,14 @@ module i2c_master (
                                 end
                             endcase
                         end else begin
-                            clock_divider <= divider*3/4;
+                            ack_error <= 1'b1;
+                            clock_divider <= 16'd0;
+                            sda_en <= 1'b1;
+                            sda_out <= 1'b1;
+                            if (stop_latched)
+                                state <= STOP;
+                            else
+                                state <= COMPLETE;
                         end
                     end else if (clock_divider > divider/4 - 1) begin
                         if (sda == 1'b0)
@@ -269,7 +287,37 @@ module i2c_master (
                     else if (clock_divider == divider - 1) begin
                         clock_divider <= 16'd0;
                         sda_en <= 1'b1;
+                        if (stop_latched)
+                            state <= STOP;
+                        else
+                            state <= COMPLETE;
+                    end
+                end
+
+                COMPLETE: begin
+                    done <= 1'b1;
+                    clock_divider <= 16'd0;
+                    sda_en <= 1'b1;
+                    sda_out <= 1'b1;
+                    scl_en <= 1'b1;
+                    scl_out <= 1'b0;
+
+                    if (stopfr) begin
+                        done <= 1'b0;
                         state <= STOP;
+                    end else if (startfr) begin
+                        done <= 1'b0;
+                        writebytedone <= 1'b0;
+                        readbytedone <= 1'b0;
+                        ack_error <= 1'b0;
+                        reg_addr_latched <= reg_addr;
+                        data_wr_latched <= data_wr;
+                        op_read <= r_w;
+                        stop_latched <= stopfr;
+                        tx_byte <= {MPU6050_ADDR, 1'b0};
+                        phase <= PHASE_DEV_ADDR_W;
+                        data_rd_reg <= {(READ_BYTES*8){1'b0}};
+                        state <= REPEATED_START;
                     end
                 end
 

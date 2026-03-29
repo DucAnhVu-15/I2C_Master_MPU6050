@@ -4,6 +4,9 @@ module mpu6050_i2c(
     output wire [15:0] accel_x,
     output wire [15:0] accel_y,
     output wire [15:0] accel_z,
+    output wire [15:0] gyro_x,
+    output wire [15:0] gyro_y,
+    output wire [15:0] gyro_z,
     output wire        data_valid,
     output wire        init_done,
     output wire        error,
@@ -17,10 +20,12 @@ module mpu6050_i2c(
     parameter [7:0] CFG_SMPLRT_DIV   = 8'd7;   // Fs = 1kHz/(1+CFG_SMPLRT_DIV) khi DLPF bat
     parameter [2:0] CFG_DLPF_CFG     = 3'd3;   // DLPF ~44Hz cho accel, ~42Hz cho gyro
     parameter [1:0] CFG_ACCEL_FS_SEL = 2'd0;   // 0:+/-2g, 1:+/-4g, 2:+/-8g, 3:+/-16g
+    parameter [1:0] CFG_GYRO_FS_SEL  = 2'd0;   // 0:+/-250dps, 1:+/-500dps, 2:+/-1000dps, 3:+/-2000dps
     parameter [7:0] CFG_INT_ENABLE   = 8'h01;  // bit0=DATA_RDY_EN
 
     parameter REG_SMPLRT_DIV   = 8'h19;
     parameter REG_CONFIG       = 8'h1A;
+    parameter REG_GYRO_CONFIG  = 8'h1B;
     parameter REG_ACCEL_CONFIG = 8'h1C;
     parameter REG_ACCEL_XOUT_H = 8'h3B;
     parameter REG_INT_ENABLE   = 8'h38;
@@ -38,8 +43,9 @@ module mpu6050_i2c(
     parameter [2:0] CFG_STEP_PWR_MGMT_1   = 3'd0;
     parameter [2:0] CFG_STEP_SMPLRT_DIV   = 3'd1;
     parameter [2:0] CFG_STEP_CONFIG       = 3'd2;
-    parameter [2:0] CFG_STEP_ACCEL_CONFIG = 3'd3;
-    parameter [2:0] CFG_STEP_INT_ENABLE   = 3'd4;
+    parameter [2:0] CFG_STEP_GYRO_CONFIG  = 3'd3;
+    parameter [2:0] CFG_STEP_ACCEL_CONFIG = 3'd4;
+    parameter [2:0] CFG_STEP_INT_ENABLE   = 3'd5;
 
     reg [2:0]  state;
     reg [2:0]  cfg_step;
@@ -51,7 +57,8 @@ module mpu6050_i2c(
     reg        startfr;
     reg        stopfr;
 
-    wire [47:0] data_rd;
+    // Doc 14 bytes: Accel(6) + Temp(2) + Gyro(6)
+    wire [111:0] data_rd;
     wire        writebytedone;
     wire        readbytedone;
     wire        done;
@@ -60,6 +67,9 @@ module mpu6050_i2c(
     reg [15:0] accel_x_r;
     reg [15:0] accel_y_r;
     reg [15:0] accel_z_r;
+    reg [15:0] gyro_x_r;
+    reg [15:0] gyro_y_r;
+    reg [15:0] gyro_z_r;
     reg        data_valid_r;
     reg        init_done_r;
     reg        error_r;
@@ -67,7 +77,7 @@ module mpu6050_i2c(
     i2c_master #(
         .divider      (divider),
         .MPU6050_ADDR (7'h68),
-        .READ_BYTES   (6)
+        .READ_BYTES   (14)       // Accel(6) + Temp(2) + Gyro(6)
     ) i2c_inst (
         .clk_sys      (clk_sys),
         .rst          (rst),
@@ -88,6 +98,9 @@ module mpu6050_i2c(
     assign accel_x    = accel_x_r;
     assign accel_y    = accel_y_r;
     assign accel_z    = accel_z_r;
+    assign gyro_x     = gyro_x_r;
+    assign gyro_y     = gyro_y_r;
+    assign gyro_z     = gyro_z_r;
     assign data_valid = data_valid_r;
     assign init_done  = init_done_r;
     assign error      = error_r;
@@ -105,6 +118,9 @@ module mpu6050_i2c(
             accel_x_r    <= 16'd0;
             accel_y_r    <= 16'd0;
             accel_z_r    <= 16'd0;
+            gyro_x_r     <= 16'd0;
+            gyro_y_r     <= 16'd0;
+            gyro_z_r     <= 16'd0;
             data_valid_r <= 1'b0;
             init_done_r  <= 1'b0;
             error_r      <= 1'b0;
@@ -134,6 +150,10 @@ module mpu6050_i2c(
                         CFG_STEP_CONFIG: begin
                             reg_addr <= REG_CONFIG;
                             data_wr  <= {5'b00000, CFG_DLPF_CFG};
+                        end
+                        CFG_STEP_GYRO_CONFIG: begin
+                            reg_addr <= REG_GYRO_CONFIG;
+                            data_wr  <= {3'b000, CFG_GYRO_FS_SEL, 3'b000};
                         end
                         CFG_STEP_ACCEL_CONFIG: begin
                             reg_addr <= REG_ACCEL_CONFIG;
@@ -193,9 +213,16 @@ module mpu6050_i2c(
                         error_r <= 1'b1;
                         state   <= ERROR_ST;
                     end else if (done) begin
-                        accel_x_r    <= data_rd[47:32];
-                        accel_y_r    <= data_rd[31:16];
-                        accel_z_r    <= data_rd[15:0];
+                        // data_rd[111:0]: 14 bytes, MSB first
+                        // Byte 0-5: Accel X,Y,Z (bits 111:64)
+                        // Byte 6-7: Temperature (bits 63:48) - bo qua
+                        // Byte 8-13: Gyro X,Y,Z (bits 47:0)
+                        accel_x_r    <= data_rd[111:96];
+                        accel_y_r    <= data_rd[95:80];
+                        accel_z_r    <= data_rd[79:64];
+                        gyro_x_r     <= data_rd[47:32];
+                        gyro_y_r     <= data_rd[31:16];
+                        gyro_z_r     <= data_rd[15:0];
                         data_valid_r <= 1'b1;
                         state        <= WAIT_SAMPLE;
                     end

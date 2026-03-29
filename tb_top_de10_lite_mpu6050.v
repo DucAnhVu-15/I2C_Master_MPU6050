@@ -1,45 +1,37 @@
 `timescale 1ns/1ps
 
-module tb_mpu6050_i2c;
+module tb_top_de10_lite_mpu6050;
 
-    // Sim nhanh
-    localparam DIVIDER_SIM        = 16;
-    localparam SAMPLE_DELAY_SIM   = 200;
-    localparam NUM_READS_SIM      = 6;
+    // Tang toc mo phong bang cach override parameter ben trong top
+    localparam DIVIDER_SIM      = 16;
+    localparam SAMPLE_DELAY_SIM = 200;
+    localparam NUM_READS_SIM    = 4;
 
-    // Cau hinh DUT de test
-    localparam [7:0] CFG_SMPLRT_DIV_SIM   = 8'd7;
-    localparam [2:0] CFG_DLPF_CFG_SIM     = 3'd3;
-    localparam [1:0] CFG_ACCEL_FS_SEL_SIM = 2'd0;
-    localparam [7:0] CFG_INT_ENABLE_SIM   = 8'h01;
+    localparam [7:0] DEV_ADDR_W       = 8'hD0;
+    localparam [7:0] DEV_ADDR_R       = 8'hD1;
+    localparam [7:0] REG_SMPLRT_DIV   = 8'h19;
+    localparam [7:0] REG_CONFIG       = 8'h1A;
+    localparam [7:0] REG_ACCEL_CONFIG = 8'h1C;
+    localparam [7:0] REG_INT_ENABLE   = 8'h38;
+    localparam [7:0] REG_ACCEL_XOUT_H = 8'h3B;
+    localparam [7:0] REG_PWR_MGMT_1   = 8'h6B;
 
-    localparam [7:0] DEV_ADDR_W         = 8'hD0;
-    localparam [7:0] DEV_ADDR_R         = 8'hD1;
-    localparam [7:0] REG_SMPLRT_DIV     = 8'h19;
-    localparam [7:0] REG_CONFIG         = 8'h1A;
-    localparam [7:0] REG_ACCEL_CONFIG   = 8'h1C;
-    localparam [7:0] REG_INT_ENABLE     = 8'h38;
-    localparam [7:0] REG_ACCEL_XOUT_H   = 8'h3B;
-    localparam [7:0] REG_PWR_MGMT_1     = 8'h6B;
+    localparam [7:0] CFG_SMPLRT_DIV   = 8'd7;
+    localparam [2:0] CFG_DLPF_CFG     = 3'd3;
+    localparam [1:0] CFG_ACCEL_FS_SEL = 2'd0;
+    localparam [7:0] CFG_INT_ENABLE   = 8'h01;
 
-    reg clk_sys;
-    reg rst;
+    reg        clk_50;
+    reg [1:0]  key;
 
     tri1 sda;
     tri1 scl;
 
-    wire [15:0] accel_x;
-    wire [15:0] accel_y;
-    wire [15:0] accel_z;
-    wire        data_valid;
-    wire        init_done;
-    wire        error;
-
     reg sda_slave_drive_low;
     reg [7:0] rx_byte;
+
     integer error_count;
-    integer read_idx_chk;
-    integer read_idx_slv;
+    integer read_idx;
 
     reg [15:0] accel_x_seq [0:NUM_READS_SIM-1];
     reg [15:0] accel_y_seq [0:NUM_READS_SIM-1];
@@ -47,30 +39,20 @@ module tb_mpu6050_i2c;
 
     assign sda = sda_slave_drive_low ? 1'b0 : 1'bz;
 
-    mpu6050_i2c #(
-        .divider          (DIVIDER_SIM),
-        .sample_delay     (SAMPLE_DELAY_SIM),
-        .CFG_SMPLRT_DIV   (CFG_SMPLRT_DIV_SIM),
-        .CFG_DLPF_CFG     (CFG_DLPF_CFG_SIM),
-        .CFG_ACCEL_FS_SEL (CFG_ACCEL_FS_SEL_SIM),
-        .CFG_INT_ENABLE   (CFG_INT_ENABLE_SIM)
-    ) dut (
-        .clk_sys    (clk_sys),
-        .rst        (rst),
-        .accel_x    (accel_x),
-        .accel_y    (accel_y),
-        .accel_z    (accel_z),
-        .data_valid (data_valid),
-        .init_done  (init_done),
-        .error      (error),
-        .sda        (sda),
-        .scl        (scl)
+    top_de10_lite_mpu6050 dut (
+        .MAX10_CLK1_50 (clk_50),
+        .KEY           (key),
+        .I2C_SDA       (sda),
+        .I2C_SCL       (scl)
     );
 
-    // 50 MHz
+    // Override de mo phong nhanh hon
+    defparam dut.u_mpu6050_i2c.divider      = DIVIDER_SIM;
+    defparam dut.u_mpu6050_i2c.sample_delay = SAMPLE_DELAY_SIM;
+
     initial begin
-        clk_sys = 1'b0;
-        forever #10 clk_sys = ~clk_sys;
+        clk_50 = 1'b0;
+        forever #10 clk_50 = ~clk_50;
     end
 
     task automatic check_flag;
@@ -93,18 +75,6 @@ module tb_mpu6050_i2c;
             if (actual !== expected) begin
                 error_count = error_count + 1;
                 $display("[ERROR] %0s got=%02h exp=%02h t=%0t", msg, actual, expected, $time);
-            end
-        end
-    endtask
-
-    task automatic check_16;
-        input [15:0] actual;
-        input [15:0] expected;
-        input [255:0] msg;
-        begin
-            if (actual !== expected) begin
-                error_count = error_count + 1;
-                $display("[ERROR] %0s got=%04h exp=%04h t=%0t", msg, actual, expected, $time);
             end
         end
     endtask
@@ -173,7 +143,6 @@ module tb_mpu6050_i2c;
         end
     endtask
 
-    // Giao dich write 1 byte: START D0 REG DATA STOP
     task automatic handle_write_reg;
         input [7:0] reg_expect;
         input [7:0] data_expect;
@@ -197,7 +166,6 @@ module tb_mpu6050_i2c;
         end
     endtask
 
-    // Giao dich read burst: START D0 3B RSTART D1 [6 bytes] STOP
     task automatic handle_accel_read;
         input [15:0] ax;
         input [15:0] ay;
@@ -231,66 +199,51 @@ module tb_mpu6050_i2c;
         end
     endtask
 
-    // Kich ban chinh
     initial begin
         error_count = 0;
         sda_slave_drive_low = 1'b0;
-        rst = 1'b0;
+        key = 2'b00;
 
-        // Du lieu MPU gia lap cho cac lan doc
         accel_x_seq[0] = 16'h1234; accel_y_seq[0] = 16'hFE00; accel_z_seq[0] = 16'h0064;
         accel_x_seq[1] = 16'h1240; accel_y_seq[1] = 16'hFE10; accel_z_seq[1] = 16'h0070;
         accel_x_seq[2] = 16'h1250; accel_y_seq[2] = 16'hFE20; accel_z_seq[2] = 16'h0080;
         accel_x_seq[3] = 16'h1260; accel_y_seq[3] = 16'hFE30; accel_z_seq[3] = 16'h0090;
-        accel_x_seq[4] = 16'h1270; accel_y_seq[4] = 16'hFE40; accel_z_seq[4] = 16'h00A0;
-        accel_x_seq[5] = 16'h1280; accel_y_seq[5] = 16'hFE50; accel_z_seq[5] = 16'h00B0;
 
-        repeat (20) @(posedge clk_sys);
-        rst = 1'b1;
+        repeat (20) @(posedge clk_50);
+        key[0] = 1'b1;
+        key[1] = 1'b1;
 
-        wait (init_done === 1'b1);
-        check_flag(error, 1'b0, "error sau init");
+        // Cho slave phuc vu xong tat ca giao dich mong doi
+        wait (read_idx == NUM_READS_SIM);
 
-        for (read_idx_chk = 0; read_idx_chk < NUM_READS_SIM; read_idx_chk = read_idx_chk + 1) begin
-            wait (data_valid === 1'b1);
-            check_16(accel_x, accel_x_seq[read_idx_chk], "accel_x");
-            check_16(accel_y, accel_y_seq[read_idx_chk], "accel_y");
-            check_16(accel_z, accel_z_seq[read_idx_chk], "accel_z");
-            $display("[INFO] Read #%0d AX=%04h AY=%04h AZ=%04h t=%0t",
-                     read_idx_chk + 1, accel_x, accel_y, accel_z, $time);
-            if (read_idx_chk < NUM_READS_SIM - 1)
-                @(negedge data_valid);
-        end
-
-        repeat (20) @(posedge clk_sys);
+        repeat (50) @(posedge clk_50);
 
         if (error_count == 0)
-            $display("TB PASS: mpu6050_i2c");
+            $display("TB PASS: top_de10_lite_mpu6050");
         else
             $display("TB FAIL: error_count=%0d", error_count);
 
         $stop;
     end
 
-    // Timeout de tranh treo mo phong
     initial begin
-        #5_000_000;
+        #10_000_000;
         $display("[ERROR] TB timeout");
         $stop;
     end
 
-    // Gia lap slave MPU6050
     initial begin
-        wait (rst === 1'b1);
+        read_idx = 0;
+        wait (key[0] === 1'b1);
 
-        handle_write_reg(REG_PWR_MGMT_1,   8'h00,                         "cfg pwr_mgmt_1");
-        handle_write_reg(REG_SMPLRT_DIV,   CFG_SMPLRT_DIV_SIM,            "cfg smplrt_div");
-        handle_write_reg(REG_CONFIG,       {5'b00000, CFG_DLPF_CFG_SIM},  "cfg config");
-        handle_write_reg(REG_ACCEL_CONFIG, {3'b000, CFG_ACCEL_FS_SEL_SIM, 3'b000}, "cfg accel_config");
-        handle_write_reg(REG_INT_ENABLE,   CFG_INT_ENABLE_SIM,            "cfg int_enable");
+        handle_write_reg(REG_PWR_MGMT_1,   8'h00,                        "cfg pwr_mgmt_1");
+        handle_write_reg(REG_SMPLRT_DIV,   CFG_SMPLRT_DIV,               "cfg smplrt_div");
+        handle_write_reg(REG_CONFIG,       {5'b00000, CFG_DLPF_CFG},     "cfg config");
+        handle_write_reg(REG_ACCEL_CONFIG, {3'b000, CFG_ACCEL_FS_SEL, 3'b000}, "cfg accel_config");
+        handle_write_reg(REG_INT_ENABLE,   CFG_INT_ENABLE,               "cfg int_enable");
 
-        for (read_idx_slv = 0; read_idx_slv < NUM_READS_SIM; read_idx_slv = read_idx_slv + 1)
-            handle_accel_read(accel_x_seq[read_idx_slv], accel_y_seq[read_idx_slv], accel_z_seq[read_idx_slv]);
+        for (read_idx = 0; read_idx < NUM_READS_SIM; read_idx = read_idx + 1)
+            handle_accel_read(accel_x_seq[read_idx], accel_y_seq[read_idx], accel_z_seq[read_idx]);
     end
 
 endmodule

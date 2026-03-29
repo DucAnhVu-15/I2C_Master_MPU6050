@@ -13,18 +13,36 @@ module mpu6050_i2c(
     parameter divider      = 125;       // 50MHz/400kHz
     parameter sample_delay = 500000;    // so chu ky cho giua 2 lan doc
 
-    parameter REG_PWR_MGMT_1   = 8'h6B;
+    // Tham so cau hinh MPU6050
+    parameter [7:0] CFG_SMPLRT_DIV   = 8'd7;   // Fs = 1kHz/(1+CFG_SMPLRT_DIV) khi DLPF bat
+    parameter [2:0] CFG_DLPF_CFG     = 3'd3;   // DLPF ~44Hz cho accel, ~42Hz cho gyro
+    parameter [1:0] CFG_ACCEL_FS_SEL = 2'd0;   // 0:+/-2g, 1:+/-4g, 2:+/-8g, 3:+/-16g
+    parameter [7:0] CFG_INT_ENABLE   = 8'h01;  // bit0=DATA_RDY_EN
+
+    parameter REG_SMPLRT_DIV   = 8'h19;
+    parameter REG_CONFIG       = 8'h1A;
+    parameter REG_ACCEL_CONFIG = 8'h1C;
     parameter REG_ACCEL_XOUT_H = 8'h3B;
+    parameter REG_INT_ENABLE   = 8'h38;
+    parameter REG_PWR_MGMT_1   = 8'h6B;
 
     parameter IDLE        = 3'd0;
-    parameter WAKEUP      = 3'd1;
-    parameter WAKEUP_WAIT = 3'd2;
-    parameter WAIT_SAMPLE = 3'd3;
-    parameter READ_REQ    = 3'd4;
-    parameter READ_WAIT   = 3'd5;
-    parameter ERROR_ST    = 3'd6;
+    parameter CFG_LOAD    = 3'd1;
+    parameter CFG_REQ     = 3'd2;
+    parameter CFG_WAIT    = 3'd3;
+    parameter WAIT_SAMPLE = 3'd4;
+    parameter READ_REQ    = 3'd5;
+    parameter READ_WAIT   = 3'd6;
+    parameter ERROR_ST    = 3'd7;
+
+    parameter [2:0] CFG_STEP_PWR_MGMT_1   = 3'd0;
+    parameter [2:0] CFG_STEP_SMPLRT_DIV   = 3'd1;
+    parameter [2:0] CFG_STEP_CONFIG       = 3'd2;
+    parameter [2:0] CFG_STEP_ACCEL_CONFIG = 3'd3;
+    parameter [2:0] CFG_STEP_INT_ENABLE   = 3'd4;
 
     reg [2:0]  state;
+    reg [2:0]  cfg_step;
     reg [31:0] cnt_delay;
 
     reg        r_w;
@@ -77,6 +95,7 @@ module mpu6050_i2c(
     always @(posedge clk_sys or negedge rst) begin
         if (!rst) begin
             state        <= IDLE;
+            cfg_step     <= CFG_STEP_PWR_MGMT_1;
             cnt_delay    <= 32'd0;
             r_w          <= 1'b0;
             reg_addr     <= 8'h00;
@@ -96,27 +115,59 @@ module mpu6050_i2c(
 
             case (state)
                 IDLE: begin
-                    r_w      <= 1'b0;
-                    reg_addr <= REG_PWR_MGMT_1;
-                    data_wr  <= 8'h00;
-                    state    <= WAKEUP;
+                    cfg_step <= CFG_STEP_PWR_MGMT_1;
+                    state    <= CFG_LOAD;
                 end
 
-                WAKEUP: begin
+                CFG_LOAD: begin
+                    r_w <= 1'b0;
+
+                    case (cfg_step)
+                        CFG_STEP_PWR_MGMT_1: begin
+                            reg_addr <= REG_PWR_MGMT_1;
+                            data_wr  <= 8'h00;
+                        end
+                        CFG_STEP_SMPLRT_DIV: begin
+                            reg_addr <= REG_SMPLRT_DIV;
+                            data_wr  <= CFG_SMPLRT_DIV;
+                        end
+                        CFG_STEP_CONFIG: begin
+                            reg_addr <= REG_CONFIG;
+                            data_wr  <= {5'b00000, CFG_DLPF_CFG};
+                        end
+                        CFG_STEP_ACCEL_CONFIG: begin
+                            reg_addr <= REG_ACCEL_CONFIG;
+                            data_wr  <= {3'b000, CFG_ACCEL_FS_SEL, 3'b000};
+                        end
+                        default: begin
+                            reg_addr <= REG_INT_ENABLE;
+                            data_wr  <= CFG_INT_ENABLE;
+                        end
+                    endcase
+
+                    state <= CFG_REQ;
+                end
+
+                CFG_REQ: begin
                     r_w     <= 1'b0;
                     stopfr  <= 1'b1;
                     startfr <= 1'b1;
-                    state   <= WAKEUP_WAIT;
+                    state   <= CFG_WAIT;
                 end
 
-                WAKEUP_WAIT: begin
+                CFG_WAIT: begin
                     if (ack_error) begin
                         error_r <= 1'b1;
                         state   <= ERROR_ST;
                     end else if (done) begin
-                        init_done_r <= 1'b1;
-                        cnt_delay   <= 32'd0;
-                        state       <= WAIT_SAMPLE;
+                        if (cfg_step == CFG_STEP_INT_ENABLE) begin
+                            init_done_r <= 1'b1;
+                            cnt_delay   <= 32'd0;
+                            state       <= WAIT_SAMPLE;
+                        end else begin
+                            cfg_step <= cfg_step + 1'b1;
+                            state    <= CFG_LOAD;
+                        end
                     end
                 end
 

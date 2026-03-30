@@ -38,7 +38,7 @@
 
 set_global_assignment -name FAMILY "MAX 10"
 set_global_assignment -name DEVICE 10M50DAF484C7G
-set_global_assignment -name TOP_LEVEL_ENTITY top_de10_lite_mpu6050
+set_global_assignment -name TOP_LEVEL_ENTITY top_distance_calculator
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION 17.1.0
 set_global_assignment -name PROJECT_CREATION_TIME_DATE "00:17:30  FEBRUARY 19, 2026"
 set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
@@ -56,18 +56,9 @@ set_global_assignment -name EDA_NATIVELINK_SIMULATION_TEST_BENCH tb_mpu6050_i2c 
 set_global_assignment -name EDA_TEST_BENCH_NAME tb_i2c_master -section_id eda_simulation
 set_global_assignment -name EDA_DESIGN_INSTANCE_NAME NA -section_id tb_i2c_master
 set_global_assignment -name EDA_TEST_BENCH_MODULE_NAME tb_i2c_master -section_id tb_i2c_master
-set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
-set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
-set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 set_global_assignment -name EDA_TEST_BENCH_NAME tb_mpu6050_i2c -section_id eda_simulation
 set_global_assignment -name EDA_DESIGN_INSTANCE_NAME NA -section_id tb_mpu6050_i2c
 set_global_assignment -name EDA_TEST_BENCH_MODULE_NAME tb_mpu6050_i2c -section_id tb_mpu6050_i2c
-set_global_assignment -name VERILOG_FILE tb_top_de10_lite_mpu6050.v
-set_global_assignment -name VERILOG_FILE tb_mpu6050_i2c.v
-set_global_assignment -name VERILOG_FILE mpu6050_i2c.v
-set_global_assignment -name VERILOG_FILE i2c_master.v
-set_global_assignment -name VERILOG_FILE tb_i2c_master.v
-set_global_assignment -name VERILOG_FILE top_de10_lite_mpu6050.v
 set_global_assignment -name EDA_TEST_BENCH_FILE tb_i2c_master.v -section_id tb_i2c_master
 set_global_assignment -name EDA_TEST_BENCH_FILE tb_mpu6050_i2c.v -section_id tb_mpu6050_i2c
 set_global_assignment -name EDA_TEST_BENCH_NAME tb_top_de10_lite_mpu6050 -section_id eda_simulation
@@ -80,8 +71,22 @@ set_location_assignment PIN_A7 -to KEY[1]
 set_location_assignment PIN_V10 -to I2C_SCL
 set_location_assignment PIN_W10 -to I2C_SDA
 set_location_assignment PIN_V9 -to UART_TX
+set_global_assignment -name VERILOG_FILE top_distance_calculator.v
+set_global_assignment -name VERILOG_FILE top_gyro_buffer_sender.v
+set_global_assignment -name VERILOG_FILE top_accel_gyro_realtime.v
+set_global_assignment -name VERILOG_FILE uart_gyro_buffer_sender.v
+set_global_assignment -name VERILOG_FILE uart_distance_sender.v
+set_global_assignment -name VERILOG_FILE distance_calculator.v
+set_global_assignment -name VERILOG_FILE buffer_gyro_x_y_z.v
+set_global_assignment -name VERILOG_FILE tb_top_de10_lite_mpu6050.v
+set_global_assignment -name VERILOG_FILE tb_mpu6050_i2c.v
+set_global_assignment -name VERILOG_FILE mpu6050_i2c.v
+set_global_assignment -name VERILOG_FILE i2c_master.v
+set_global_assignment -name VERILOG_FILE tb_i2c_master.v
 set_global_assignment -name VERILOG_FILE uart_tx.v
-set_global_assignment -name VERILOG_FILE uart_rx.v
 set_global_assignment -name VERILOG_FILE fifo_sync.v
 set_global_assignment -name VERILOG_FILE baud_gen.v
+set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
+set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
+set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

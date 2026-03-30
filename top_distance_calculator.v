@@ -8,7 +8,8 @@ module top_distance_calculator (
     input  wire [1:0]  KEY,
     inout  wire        I2C_SDA,
     inout  wire        I2C_SCL,
-    output wire        UART_TX
+    output wire        UART_TX,
+    output reg         LED_ALERT      // LED bật 5s khi vượt ngưỡng
 );
 
     // ========================================
@@ -230,6 +231,39 @@ module top_distance_calculator (
         .fifo_din       (sender_fifo_din),
         .fifo_full      (fifo_full)
     );
+
+    // ========================================
+    // LED Alert Trigger - Bật LED trong 5s khi vượt ngưỡng
+    // ========================================
+    localparam LED_DURATION = 250_000_000;  // 5s @ 50MHz
+    reg [27:0] led_counter;
+    reg        led_active;
+    
+    always @(posedge MAX10_CLK1_50 or posedge rst) begin
+        if (rst) begin
+            LED_ALERT   <= 1'b0;
+            led_counter <= 28'd0;
+            led_active  <= 1'b0;
+        end else begin
+            // Trigger LED khi phát hiện vượt ngưỡng
+            if (calc_done && threshold_exceeded && !led_active) begin
+                LED_ALERT   <= 1'b1;
+                led_active  <= 1'b1;
+                led_counter <= 28'd0;
+            end
+            // Đếm thời gian khi LED đang bật
+            else if (led_active) begin
+                if (led_counter < LED_DURATION) begin
+                    led_counter <= led_counter + 1'b1;
+                end else begin
+                    // Hết 5s, tắt LED
+                    LED_ALERT   <= 1'b0;
+                    led_active  <= 1'b0;
+                    led_counter <= 28'd0;
+                end
+            end
+        end
+    end
 
     // Tie off unused signals
     wire unused_ok;
